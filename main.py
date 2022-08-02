@@ -1,5 +1,8 @@
 from argparse import ArgumentParser
 from pathlib import Path
+from sys import stderr
+
+from mido import MidiFile
 
 parser = ArgumentParser(description="Turns music into a lot of TypeScript "
                                     "code for MakeCode Arcade!")
@@ -20,3 +23,27 @@ if out_path is None:
     # Put output file in the same directory as input file with same name
     # but with different extension
     out_path = in_path.parent / (in_path.stem + ".txt")
+
+
+def log(msg: str):
+    if not to_stdout:
+        print(msg)
+
+
+def err(msg: str):
+    stderr.write(msg)
+
+
+log(f"Parsing {in_path}")
+midi = MidiFile(in_path)
+
+if midi.type not in (0, 1):
+    err(f"MIDI file not type 0 or type 1!")
+    exit(1)
+
+log(f"MIDI file type: {midi.type}")
+
+for track_i, track in enumerate(midi.tracks):
+    print(f"Track {track_i + 1} / {len(midi.tracks)}")
+    for msg in track:
+        print(f"  Message: {msg}")
