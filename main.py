@@ -43,7 +43,5 @@ if midi.type not in (0, 1):
 
 log(f"MIDI file type: {midi.type}")
 
-for track_i, track in enumerate(midi.tracks):
-    print(f"Track {track_i + 1} / {len(midi.tracks)}")
-    for msg in track:
-        print(f"  Message: {msg}")
+for msg in midi:
+    log(f"Message: {msg}")
