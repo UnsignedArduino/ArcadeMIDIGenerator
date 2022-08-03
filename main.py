@@ -6,10 +6,10 @@ from sys import stderr
 
 from mido import MidiFile, Message
 
-parser = ArgumentParser(description="Turns music into a lot of TypeScript "
-                                    "code for MakeCode Arcade!")
+parser = ArgumentParser(description="Turns a MIDI file into a lot of "
+                                    "TypeScript code for MakeCode Arcade!")
 parser.add_argument("path", type=Path,
-                    help="The path to the music file. ")
+                    help="The path to the MIDI file. ")
 parser.add_argument("--output_path", type=Path,
                     default=None, help="The path to write the code to")
 parser.add_argument("--stdout", action="store_const",
