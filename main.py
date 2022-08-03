@@ -1,5 +1,6 @@
 import logging
 from argparse import ArgumentParser
+from collections import Counter
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
@@ -88,11 +89,20 @@ logger.debug(f"MIDI file type: {midi.type}")
 msgs = tuple(midi)
 
 
+# https://stackoverflow.com/a/20872750/10291933
+def most_common(lst: list):
+    if len(lst) == 0:
+        return None
+    data = Counter(lst)
+    return max(lst, key=data.get)
+
+
 @dataclass
 class NextChordResult:
     notes: list[Message]
     ending_index: int
     time: float
+    most_common_velocity: int
 
 
 def find_next_chord(index: int) -> NextChordResult:
@@ -106,15 +116,18 @@ def find_next_chord(index: int) -> NextChordResult:
     chord_notes = []
     chord_end_index = index
     chord_time = 0
+    chord_velocities = []
     for i in range(index, len(msgs)):
         cur_msg = msgs[i]
         if cur_msg.type == "note_on" and cur_msg.velocity > 0:
             chord_notes.append(cur_msg)
+            chord_velocities.append(cur_msg.velocity)
         if cur_msg.time > 0 or cur_msg.type != "note_on":
             chord_end_index = i
             chord_time = cur_msg.time
             break
-    return NextChordResult(chord_notes, chord_end_index, chord_time)
+    return NextChordResult(chord_notes, chord_end_index,
+                           chord_time, most_common(chord_velocities))
 
 
 def find_time_of_note(index: int) -> float:
@@ -165,18 +178,68 @@ def get_frequency(note: str, A4: int = 440) -> float:
     return A4 * 2 ** ((key_number - 49) / 12)
 
 
+logger.info("Generating code")
+
+code = """
+interface ArcadeMIDINote {
+    frequency: number;
+    duration: number;
+};
+
+interface ArcadeMIDIChord {
+    notes: ArcadeMIDINote[];
+    duration: number;
+    volume: number;
+};
+
+function play_arcade_midi_chord(chord: ArcadeMIDIChord) {
+    music.setVolume(chord.volume);
+    for (const note of chord.notes) {
+        ((midiNote: ArcadeMIDINote) => {
+            control.runInParallel(() => {
+                music.playTone(midiNote.frequency, midiNote.duration);
+            });
+        })(note);
+    }
+    pause(chord.duration);
+}
+
+
+"""
+
 i = 0
 while i < len(msgs):
     msg = msgs[i]
     if msg.type == "note_on":
         result = find_next_chord(i)
         if len(result.notes) > 0:
-            logger.debug(f"Chord of {len(result.notes)} with duration {result.time}s:")
+            logger.debug(f"Chord of {len(result.notes)} with "
+                         f"duration {result.time}s:")
+            note_list = ", ".join(map(lambda n: note_num_to_name(n.note - 21), result.notes))
+            code += f"/* {note_list} for {round(result.time * 1000)}ms */ "
+            code += "play_arcade_midi_chord({ notes: [ "
             for note in result.notes:
-                logger.debug(f"  - {note_num_to_name(note.note - 21)} at "
+                midi_note = note.note - 21
+                midi_name = note_num_to_name(midi_note)
+                midi_time = find_time_of_note(i)
+                logger.debug(f"  - {midi_name} at "
                              f"velocity {note.velocity} for "
-                             f"{find_time_of_note(i)}s")
+                             f"{midi_time}s")
+                code += "{ "
+                code += f"frequency: {round(get_frequency(midi_name))}, " \
+                        f"duration: {round(midi_time * 1000)}"
+                code += " }, "
+            code += f" ], " \
+                    f"duration: {round(result.time * 1000)}, " \
+                    f"volume: {result.most_common_velocity}"
+            code += " });\n"
         i = result.ending_index + 1
     else:
         logger.debug(f"Meta message: {msg}")
         i += 1
+
+if to_stdout:
+    print(code)
+else:
+    logger.info(f"Writing to {out_path}")
+    out_path.write_text(code)
