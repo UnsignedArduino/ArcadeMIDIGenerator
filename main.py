@@ -1,8 +1,9 @@
+import logging
 from argparse import ArgumentParser
 from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
-from sys import stderr
+from sys import stdout, stderr
 
 from mido import MidiFile, Message
 
@@ -29,28 +30,58 @@ if out_path is None:
     out_path = in_path.parent / (in_path.stem + ".txt")
 
 
-def log(msg: str):
-    if not to_stdout and debug:
-        print(msg)
+def create_logger(name: str, level: int = logging.DEBUG) -> logging.Logger:
+    """
+    A simple function to create a logger. You would typically put this right
+    under all the other modules you imported.
+    And then call `logger.debug()`, `logger.info()`, `logger.warning()`,
+    `logger.error()`, `logger.critical()`, and
+    `logger.exception` everywhere in that module.
+    :param name: A string with the logger name.
+    :param level: A integer with the logger level. Defaults to logging.DEBUG.
+    :return: A logging.Logger which you can use as a regular logger.
+    """
+    logger = logging.getLogger(name=name)
+    logger.setLevel(level=level)
+    logger.propagate = False
+
+    console_formatter = logging.Formatter("%(asctime)s - %(name)s - "
+                                          "%(levelname)s - %(message)s")
+
+    # https://stackoverflow.com/a/16066513/10291933
+    stdout_handler = logging.StreamHandler(stream=stdout)
+    stdout_handler.setLevel(level=level)
+    stdout_handler.addFilter(lambda record: record.levelno <= logging.INFO)
+    stdout_handler.setFormatter(fmt=console_formatter)
+    if stdout_handler not in logger.handlers:
+        logger.addHandler(hdlr=stdout_handler)
+
+    stderr_handler = logging.StreamHandler(stream=stderr)
+    stderr_handler.setLevel(level=logging.WARNING)
+    stderr_handler.setFormatter(fmt=console_formatter)
+    if stderr_handler not in logger.handlers:
+        logger.addHandler(hdlr=stderr_handler)
+
+    logger.debug(f"Created logger named {repr(name)} with level {repr(level)}")
+    logger.debug(f"Handlers for {repr(name)}: {repr(logger.handlers)}")
+    return logger
 
 
-def info(msg: str):
-    if not to_stdout:
-        print(msg)
+if to_stdout:
+    level = logging.WARNING
+elif debug:
+    level = logging.DEBUG
+else:
+    level = logging.INFO
+logger = create_logger(__name__, level=level)
 
-
-def err(msg: str):
-    stderr.write(msg)
-
-
-info(f"Parsing {in_path}")
+logger.info(f"Parsing {in_path}")
 midi = MidiFile(in_path)
 
 if midi.type not in (0, 1):
-    err(f"MIDI file not type 0 or type 1!")
-    exit(1)
+    raise ValueError(f"MIDI file not type 0 or type 1!")
 
-log(f"MIDI file type: {midi.type}")
+logger.debug(f"MIDI file type: {midi.type}")
 
 # Generate all MIDI messages in playback order
 # This will squish all tracks together
@@ -140,12 +171,12 @@ while i < len(msgs):
     if msg.type == "note_on":
         result = find_next_chord(i)
         if len(result.notes) > 0:
-            log(f"Chord of {len(result.notes)} with duration {result.time}s:")
+            logger.debug(f"Chord of {len(result.notes)} with duration {result.time}s:")
             for note in result.notes:
-                log(f"  - {note_num_to_name(note.note - 21)} at "
-                    f"velocity {note.velocity} for "
-                    f"{find_time_of_note(i)}s")
+                logger.debug(f"  - {note_num_to_name(note.note - 21)} at "
+                             f"velocity {note.velocity} for "
+                             f"{find_time_of_note(i)}s")
         i = result.ending_index + 1
     else:
-        log(f"Meta message: {msg}")
+        logger.debug(f"Meta message: {msg}")
         i += 1
