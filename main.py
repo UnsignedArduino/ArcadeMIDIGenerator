@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 from dataclasses import dataclass
+from math import ceil
 from pathlib import Path
 from sys import stderr
 
@@ -62,7 +63,7 @@ def find_next_chord(index: int) -> NextChordResult:
     has non-zero time.
 
     :param index: The index to start looking at.
-    :return: A list of Message.
+    :return: A NextChordResult dataclass.
     """
     chord_notes = []
     chord_end_index = index
@@ -78,6 +79,32 @@ def find_next_chord(index: int) -> NextChordResult:
     return NextChordResult(chord_notes, chord_end_index, chord_time)
 
 
+def find_time_of_note(index: int) -> float:
+    """
+    Finds the duration of a note.
+
+    :param index: The index of the note.
+    :return: The duration of note, in seconds.
+    """
+    note_time = 0
+    for i in range(index, len(msgs)):
+        cur_msg = msgs[i]
+        note_time += cur_msg.time
+        if cur_msg.type == "note_on" and \
+                cur_msg.velocity == 0 and \
+                cur_msg.note == msgs[index].note:
+            break
+    return note_time
+
+
+def note_num_to_name(num: int) -> str:
+    # https://stackoverflow.com/a/54546263/10291933
+    notes = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
+    octave = ceil(num / 12)
+    name = notes[num % 12]
+    return name + str(octave)
+
+
 i = 0
 while i < len(msgs):
     msg = msgs[i]
@@ -86,7 +113,9 @@ while i < len(msgs):
         if len(result.notes) > 0:
             log(f"Chord of {len(result.notes)} with duration {result.time}s:")
             for note in result.notes:
-                log(f"  - {note}")
+                log(f"  - {note_num_to_name(note.note - 21)} at "
+                    f"velocity {note.velocity} for "
+                    f"{find_time_of_note(i)}s")
         i = result.ending_index + 1
     else:
         log(f"Meta message: {msg}")
