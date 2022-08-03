@@ -69,7 +69,7 @@ def find_next_chord(index: int) -> NextChordResult:
     chord_time = 0
     for i in range(index, len(msgs)):
         cur_msg = msgs[i]
-        if cur_msg.type == "note_on":
+        if cur_msg.type == "note_on" and cur_msg.velocity > 0:
             chord_notes.append(cur_msg)
         if cur_msg.time > 0 or cur_msg.type != "note_on":
             chord_end_index = i
@@ -83,9 +83,10 @@ while i < len(msgs):
     msg = msgs[i]
     if msg.type == "note_on":
         result = find_next_chord(i)
-        log(f"Chord of {len(result.notes)} with duration {result.time}s:")
-        for note in result.notes:
-            log(f"  - {note}")
+        if len(result.notes) > 0:
+            log(f"Chord of {len(result.notes)} with duration {result.time}s:")
+            for note in result.notes:
+                log(f"  - {note}")
         i = result.ending_index + 1
     else:
         log(f"Meta message: {msg}")
