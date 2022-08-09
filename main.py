@@ -121,11 +121,52 @@ def get_frequency(note: str, A4: int = 440) -> float:
 
 logger.info("Generating code")
 
-code = """"""
+code = """
+namespace ArcadeMIDI {
+    interface ArcadeMIDINote {
+        frequency: number;
+        velocity: number;
+    };
+
+    const playing_notes: ArcadeMIDINote[] = [];
+
+    export function note_on(frequency: number, velocity: number, time: number) {
+        if (velocity === 0) {
+            for (let i = 0; i < playing_notes.length; i ++) {
+                if (playing_notes[i].frequency === frequency) {
+                    playing_notes.splice(i, 1);
+                    break;
+                }
+            }
+        } else {
+            playing_notes.push({ frequency: frequency, velocity: velocity });
+        }
+        if (time > 0) {
+            pause(time);
+        }
+    }
+
+    game.onUpdateInterval(25, function () {
+        for (const note of playing_notes) {
+            music.setVolume(note.velocity);
+            music.playTone(note.frequency, 25);
+        }
+    });
+};
+
+
+"""
 
 for msg in msgs:
     if msg.type == "note_on":
         logger.debug(f"Note message: {msg}")
+        name = note_num_to_name(msg.note - 21)
+        freq = get_frequency(name)
+        code += f"ArcadeMIDI.note_on(" \
+                f"{round(freq)}, /* {name} */ " \
+                f"{msg.velocity}, " \
+                f"{round(msg.time * 1000)}" \
+                f");\n"
     else:
         logger.debug(f"Meta message: {msg}")
 
