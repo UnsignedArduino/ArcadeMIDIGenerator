@@ -89,65 +89,6 @@ logger.debug(f"MIDI file type: {midi.type}")
 msgs = tuple(midi)
 
 
-# https://stackoverflow.com/a/20872750/10291933
-def most_common(lst: list):
-    if len(lst) == 0:
-        return None
-    data = Counter(lst)
-    return max(lst, key=data.get)
-
-
-@dataclass
-class NextChordResult:
-    notes: list[Message]
-    ending_index: int
-    time: float
-    most_common_velocity: int
-
-
-def find_next_chord(index: int) -> NextChordResult:
-    """
-    Gathers notes from the current index into a list until we hit a note that
-    has non-zero time.
-
-    :param index: The index to start looking at.
-    :return: A NextChordResult dataclass.
-    """
-    chord_notes = []
-    chord_end_index = index
-    chord_time = 0
-    chord_velocities = []
-    for i in range(index, len(msgs)):
-        cur_msg = msgs[i]
-        if cur_msg.type == "note_on" and cur_msg.velocity > 0:
-            chord_notes.append(cur_msg)
-            chord_velocities.append(cur_msg.velocity)
-        if cur_msg.time > 0 or cur_msg.type != "note_on":
-            chord_end_index = i
-            chord_time = cur_msg.time
-            break
-    return NextChordResult(chord_notes, chord_end_index,
-                           chord_time, most_common(chord_velocities))
-
-
-def find_time_of_note(index: int) -> float:
-    """
-    Finds the duration of a note.
-
-    :param index: The index of the note.
-    :return: The duration of note, in seconds.
-    """
-    note_time = 0
-    for i in range(index, len(msgs)):
-        cur_msg = msgs[i]
-        note_time += cur_msg.time
-        if cur_msg.type == "note_on" and \
-                cur_msg.velocity == 0 and \
-                cur_msg.note == msgs[index].note:
-            break
-    return note_time
-
-
 def note_num_to_name(num: int) -> str:
     # https://stackoverflow.com/a/54546263/10291933
     notes = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"]
@@ -180,63 +121,13 @@ def get_frequency(note: str, A4: int = 440) -> float:
 
 logger.info("Generating code")
 
-code = """
-interface ArcadeMIDINote {
-    frequency: number;
-    duration: number;
-};
+code = """"""
 
-interface ArcadeMIDIChord {
-    notes: ArcadeMIDINote[];
-    duration: number;
-    volume: number;
-};
-
-function play_arcade_midi_chord(chord: ArcadeMIDIChord) {
-    music.setVolume(chord.volume);
-    for (const note of chord.notes) {
-        ((midiNote: ArcadeMIDINote) => {
-            control.runInParallel(() => {
-                music.playTone(midiNote.frequency, midiNote.duration);
-            });
-        })(note);
-    }
-    pause(chord.duration);
-}
-
-
-"""
-
-i = 0
-while i < len(msgs):
-    msg = msgs[i]
+for msg in msgs:
     if msg.type == "note_on":
-        result = find_next_chord(i)
-        if len(result.notes) > 0:
-            logger.debug(f"Chord of {len(result.notes)} with "
-                         f"duration {result.time}s:")
-            note_list = ", ".join(map(lambda n: note_num_to_name(n.note - 21), result.notes))
-            code += f"/* {note_list} for {round(result.time * 1000)}ms */ "
-            code += "play_arcade_midi_chord({ notes: [ "
-            for note in result.notes:
-                midi_note = note.note - 21
-                midi_name = note_num_to_name(midi_note)
-                midi_time = find_time_of_note(i)
-                logger.debug(f"  - {midi_name} at "
-                             f"velocity {note.velocity} for "
-                             f"{midi_time}s")
-                code += "{ "
-                code += f"frequency: {round(get_frequency(midi_name))}, " \
-                        f"duration: {round(midi_time * 1000)}"
-                code += " }, "
-            code += f" ], " \
-                    f"duration: {round(result.time * 1000)}, " \
-                    f"volume: {result.most_common_velocity}"
-            code += " });\n"
-        i = result.ending_index + 1
+        logger.debug(f"Note message: {msg}")
     else:
         logger.debug(f"Meta message: {msg}")
-        i += 1
 
 if to_stdout:
     print(code)
