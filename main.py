@@ -122,6 +122,7 @@ def get_frequency(note: str, A4: int = 440) -> float:
 logger.info("Generating code")
 
 code = """
+
 namespace ArcadeMIDI {
     export namespace ArcadeMIDIInternals {
         interface ArcadeMIDINote {
@@ -136,7 +137,21 @@ namespace ArcadeMIDI {
         function queuePlayInstructions(timeDelta: number, buf: Buffer) { }
 
         class ArcadeMIDISound {
-            addNote(sndInstr: Buffer, sndInstrPtr: number, ms: number, beg: number, end: number, soundWave: number, hz: number, volume: number, endHz: number): number {
+            /**
+             * Formats and writes to a provided buffer the neccessary information to play a note.
+             * 
+             * @param sndInstr The buffer to store the instruction in. 
+             * @param sndInstrPtr Index of where to start writing in the buffer.
+             * @param ms How long for the sound to last, in milliseconds.
+             * @param beg The beginning velocity.
+             * @param end The ending velocity.
+             * @param The sound wave type.
+             * @param hz The hertz of the sound.
+             * @param volume The velocity overall.
+             * @param endHz The ending hertz of the sound.
+             * @return The index of where we ended writing to the buffer.
+             */
+            private addNote(sndInstr: Buffer, sndInstrPtr: number, ms: number, beg: number, end: number, soundWave: number, hz: number, volume: number, endHz: number): number {
                 if (ms > 0) {
                     sndInstr.setNumber(NumberFormat.UInt8LE, sndInstrPtr, soundWave);
                     sndInstr.setNumber(NumberFormat.UInt8LE, sndInstrPtr + 1, 0);
@@ -151,7 +166,15 @@ namespace ArcadeMIDI {
                 return sndInstrPtr;
             }
 
-            playNoteCore(when: number, frequency: number, velocity: number, ms: number): void {
+            /**
+             * Create and queue an instruction to play.
+             * 
+             * @param when When to play the instruction, in milliseconds.
+             * @param frequency The frequency of the sound in hertz.
+             * @param velocity The velocity of the sound.
+             * @param ms The duration of the sound in milliseconds.
+             */
+            public playNoteCore(when: number, frequency: number, velocity: number, ms: number): void {
                 let buf = control.createBuffer(12);
 
                 // const amp = Math.min(Math.abs(currentSpeed) / PLAY_SPEED, 1) * 255;
@@ -163,15 +186,65 @@ namespace ArcadeMIDI {
         }
 
         export class ArcadeMIDIInstructions {
-            sound_driver: ArcadeMIDISound = undefined;
-            playing_notes: ArcadeMIDINote[] = [];
+            private sound_driver: ArcadeMIDISound = undefined;
+            private playing_notes: ArcadeMIDINote[] = [];
 
-            constructor() {
+            public constructor() {
                 this.sound_driver = new ArcadeMIDISound();
                 this.playing_notes = [];
             }
 
-            note_on(frequency: number, velocity: number, time: number) {
+            /**
+             * Converts a note number (0 - 88, on a piano) to the actual note name.
+             * 
+             * @param num The note number.
+             * @return The note name.
+             */
+            private note_num_to_name(num: number): string {
+                // https://stackoverflow.com/a/54546263/10291933
+                const notes: string[] = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"];
+                const octave = Math.ceil(num / 12);
+                const name = notes[num % 12];
+                return name + octave.toString();
+            }
+
+            /**
+             * Converts a note name into the frequency. 
+             * 
+             * @param note The note name. (example: "A4")
+             * @param A4 The frequency A4 should be at, in hertz. Defaults to 440 hertz.
+             * @return The frequency, in hertz.
+             */
+            private get_frequency(note: string, A4: number = 440): number {
+                // Get the frequency from a note name.
+
+                // param note: A note name, ex. "A4"
+                // param A4: The frequency of note A4.Defaults to 440.(hz)
+                //: return: A float of the frequency.
+
+                // https://gist.github.com/CGrassin/26a1fdf4fc5de788da9b376ff717516e
+                // MIT License
+                // Python to convert a string note(eg. "A4") to a frequency(eg. 440).
+                // Inspired by https://gist.github.com/stuartmemo/3766449
+                const notes: string[] = ["A", "A#", "B", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#"];
+                const octave: number = parseInt(note.length === 3 ? note[2] : note[1]);
+                let key_number: number = notes.indexOf(note.slice(0, note.length - 1));
+                if (key_number < 3) {
+                    key_number = key_number + 12 + ((octave - 1) * 12) + 1;
+                } else {
+                    key_number = key_number + ((octave - 1) * 12) + 1;
+                }
+                return A4 * 2 ** ((key_number - 49) / 12);
+            }
+
+            /**
+             * "note_on" MIDI command.
+             * 
+             * @param frequency The frequency to play the note at, in hertz.
+             * @param velocity The velocity to play the note at. Set to 0 to stop playing the note.
+             * @param time The time to delay afterwards, in milliseconds.
+             */
+            public note_on(frequency: number, velocity: number, time: number): void {
                 if (velocity === 0) {
                     for (let i = 0; i < this.playing_notes.length; i++) {
                         if (this.playing_notes[i].frequency === frequency) {
@@ -200,10 +273,10 @@ const midi_instr = new ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions();
 for msg in msgs:
     if msg.type == "note_on":
         logger.debug(f"Note message: {msg}")
-        name = note_num_to_name(msg.note - 21)
-        freq = get_frequency(name)
+        piano_idx = msg.note - 21
+        name = note_num_to_name(piano_idx)
         code += f"midi_instr.note_on(" \
-                f"{round(freq)}, /* {name} */ " \
+                f"{piano_idx}, /* {name} */ " \
                 f"{msg.velocity}, " \
                 f"{round(msg.time * 1000)}" \
                 f");\n"
