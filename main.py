@@ -1,12 +1,10 @@
 import logging
 from argparse import ArgumentParser
-from collections import Counter
-from dataclasses import dataclass
 from math import ceil
 from pathlib import Path
 from sys import stdout, stderr
 
-from mido import MidiFile, Message
+from mido import MidiFile
 
 parser = ArgumentParser(description="Turns a MIDI file into a lot of "
                                     "TypeScript code for MakeCode Arcade!")
