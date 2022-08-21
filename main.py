@@ -123,37 +123,77 @@ logger.info("Generating code")
 
 code = """
 namespace ArcadeMIDI {
-    interface ArcadeMIDINote {
-        frequency: number;
-        velocity: number;
-    };
+    export namespace ArcadeMIDIInternals {
+        interface ArcadeMIDINote {
+            frequency: number;
+            velocity: number;
+        };
 
-    const playing_notes: ArcadeMIDINote[] = [];
+        // All stolen from @richard on the MakeCode Forums:
+        // https://forum.makecode.com/t/announcement-makecode-arcade-mini-game-jam-2-submission-thread/14534/11?u=unsignedarduino
 
-    export function note_on(frequency: number, velocity: number, time: number) {
-        if (velocity === 0) {
-            for (let i = 0; i < playing_notes.length; i ++) {
-                if (playing_notes[i].frequency === frequency) {
-                    playing_notes.splice(i, 1);
-                    break;
+        //% shim=music::queuePlayInstructions
+        function queuePlayInstructions(timeDelta: number, buf: Buffer) { }
+
+        class ArcadeMIDISound {
+            addNote(sndInstr: Buffer, sndInstrPtr: number, ms: number, beg: number, end: number, soundWave: number, hz: number, volume: number, endHz: number): number {
+                if (ms > 0) {
+                    sndInstr.setNumber(NumberFormat.UInt8LE, sndInstrPtr, soundWave);
+                    sndInstr.setNumber(NumberFormat.UInt8LE, sndInstrPtr + 1, 0);
+                    sndInstr.setNumber(NumberFormat.UInt16LE, sndInstrPtr + 2, hz);
+                    sndInstr.setNumber(NumberFormat.UInt16LE, sndInstrPtr + 4, ms);
+                    sndInstr.setNumber(NumberFormat.UInt16LE, sndInstrPtr + 6, (beg * volume) >> 6);
+                    sndInstr.setNumber(NumberFormat.UInt16LE, sndInstrPtr + 8, (end * volume) >> 6);
+                    sndInstr.setNumber(NumberFormat.UInt16LE, sndInstrPtr + 10, endHz);
+                    sndInstrPtr += 12;
+                }
+                sndInstr.setNumber(NumberFormat.UInt8LE, sndInstrPtr, 0); // terminate
+                return sndInstrPtr;
+            }
+
+            playNoteCore(when: number, frequency: number, velocity: number, ms: number): void {
+                let buf = control.createBuffer(12);
+
+                // const amp = Math.min(Math.abs(currentSpeed) / PLAY_SPEED, 1) * 255;
+                const amp = 255;
+
+                this.addNote(buf, 0, ms, amp, amp, 1, frequency, velocity, frequency);
+                queuePlayInstructions(when, buf);
+            }
+        }
+
+        export class ArcadeMIDIInstructions {
+            sound_driver: ArcadeMIDISound = undefined;
+            playing_notes: ArcadeMIDINote[] = [];
+
+            constructor() {
+                this.sound_driver = new ArcadeMIDISound();
+                this.playing_notes = [];
+            }
+
+            note_on(frequency: number, velocity: number, time: number) {
+                if (velocity === 0) {
+                    for (let i = 0; i < this.playing_notes.length; i++) {
+                        if (this.playing_notes[i].frequency === frequency) {
+                            this.playing_notes.splice(i, 1);
+                            break;
+                        }
+                    }
+                } else {
+                    this.playing_notes.push(<ArcadeMIDINote>{ frequency: frequency, velocity: velocity });
+                }
+                if (time > 0) {
+                    for (const note of this.playing_notes) {
+                        this.sound_driver.playNoteCore(0, note.frequency, note.velocity, time);
+                    };
+                    pause(time);
                 }
             }
-        } else {
-            playing_notes.push({ frequency: frequency, velocity: velocity });
-        }
-        if (time > 0) {
-            pause(time);
         }
     }
+}
 
-    game.onUpdateInterval(25, function () {
-        for (const note of playing_notes) {
-            music.setVolume(note.velocity);
-            music.playTone(note.frequency, 25);
-        }
-    });
-};
-
+const midi_instr = new ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions();
 
 """
 
@@ -162,7 +202,7 @@ for msg in msgs:
         logger.debug(f"Note message: {msg}")
         name = note_num_to_name(msg.note - 21)
         freq = get_frequency(name)
-        code += f"ArcadeMIDI.note_on(" \
+        code += f"midi_instr.note_on(" \
                 f"{round(freq)}, /* {name} */ " \
                 f"{msg.velocity}, " \
                 f"{round(msg.time * 1000)}" \
