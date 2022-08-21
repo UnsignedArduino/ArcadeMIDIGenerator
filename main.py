@@ -122,7 +122,6 @@ def get_frequency(note: str, A4: int = 440) -> float:
 logger.info("Generating code")
 
 code = """
-
 namespace ArcadeMIDI {
     export namespace ArcadeMIDIInternals {
         interface ArcadeMIDINote {
@@ -216,12 +215,6 @@ namespace ArcadeMIDI {
              * @return The frequency, in hertz.
              */
             private get_frequency(note: string, A4: number = 440): number {
-                // Get the frequency from a note name.
-
-                // param note: A note name, ex. "A4"
-                // param A4: The frequency of note A4.Defaults to 440.(hz)
-                //: return: A float of the frequency.
-
                 // https://gist.github.com/CGrassin/26a1fdf4fc5de788da9b376ff717516e
                 // MIT License
                 // Python to convert a string note(eg. "A4") to a frequency(eg. 440).
@@ -240,11 +233,12 @@ namespace ArcadeMIDI {
             /**
              * "note_on" MIDI command.
              * 
-             * @param frequency The frequency to play the note at, in hertz.
+             * @param note_index The MIDI note index.
              * @param velocity The velocity to play the note at. Set to 0 to stop playing the note.
              * @param time The time to delay afterwards, in milliseconds.
              */
-            public note_on(frequency: number, velocity: number, time: number): void {
+            public note_on(note_index: number, velocity: number, time: number): void {
+                const frequency: number = this.get_frequency(this.note_num_to_name(note_index - 21));
                 if (velocity === 0) {
                     for (let i = 0; i < this.playing_notes.length; i++) {
                         if (this.playing_notes[i].frequency === frequency) {
@@ -273,10 +267,9 @@ const midi_instr = new ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions();
 for msg in msgs:
     if msg.type == "note_on":
         logger.debug(f"Note message: {msg}")
-        piano_idx = msg.note - 21
-        name = note_num_to_name(piano_idx)
+        name = note_num_to_name(msg.note - 21)
         code += f"midi_instr.note_on(" \
-                f"{piano_idx}, /* {name} */ " \
+                f"{msg.note}, /* {name} */ " \
                 f"{msg.velocity}, " \
                 f"{round(msg.time * 1000)}" \
                 f");\n"
