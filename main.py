@@ -119,8 +119,10 @@ def get_frequency(note: str, A4: int = 440) -> float:
 
 logger.info("Generating code")
 
-code = """
-namespace ArcadeMIDI {
+code = """namespace ArcadeMIDI {
+    let DEBUG_PARSING: boolean = true;
+    let DEBUG_PLAYING: boolean = true;
+
     export namespace ArcadeMIDIInternals {
         interface ArcadeMIDINote {
             frequency: number;
@@ -183,12 +185,12 @@ namespace ArcadeMIDI {
         }
 
         export class ArcadeMIDIInstructions {
-            private sound_driver: ArcadeMIDISound = undefined;
-            private playing_notes: ArcadeMIDINote[] = [];
+            private _sound_driver: ArcadeMIDISound = undefined;
+            private _playing_notes: ArcadeMIDINote[] = [];
 
             public constructor() {
-                this.sound_driver = new ArcadeMIDISound();
-                this.playing_notes = [];
+                this._sound_driver = new ArcadeMIDISound();
+                this._playing_notes = [];
             }
 
             /**
@@ -234,45 +236,412 @@ namespace ArcadeMIDI {
              * @param note_index The MIDI note index.
              * @param velocity The velocity to play the note at. Set to 0 to stop playing the note.
              * @param time The time to delay afterwards, in milliseconds.
+             * @param play_now Whether to actually queue the notes to play now or not. Defaults to true. 
              */
-            public note_on(note_index: number, velocity: number, time: number): void {
+            public note_on(note_index: number, velocity: number, time: number, play_now: boolean = true): void {
                 const frequency: number = this.get_frequency(this.note_num_to_name(note_index - 21));
-                if (velocity === 0) {
-                    for (let i = 0; i < this.playing_notes.length; i++) {
-                        if (this.playing_notes[i].frequency === frequency) {
-                            this.playing_notes.splice(i, 1);
+                if (velocity == 0) {
+                    for (let i = 0; i < this._playing_notes.length; i++) {
+                        if (this._playing_notes[i].frequency == frequency) {
+                            this._playing_notes.splice(i, 1);
                             break;
                         }
                     }
                 } else {
-                    this.playing_notes.push(<ArcadeMIDINote>{ frequency: frequency, velocity: velocity });
+                    this._playing_notes.push(<ArcadeMIDINote>{ frequency: frequency, velocity: velocity });
                 }
-                if (time > 0) {
-                    for (const note of this.playing_notes) {
-                        this.sound_driver.playNoteCore(0, note.frequency, note.velocity, time);
-                    };
+                if (time > 0 && play_now) {
+                    this.play_now(time);
                     pause(time);
+                }
+            }
+
+            /**
+             * Replays all the notes for a certain period of time.
+             * 
+             * @param duration The duration to play all the playing notes.
+             */
+            public play_now(duration: number) {
+                if (DEBUG_PLAYING) {
+                    console.log(`Playing ${this._playing_notes.length} frequencies`);
+                }
+                for (const note of this._playing_notes) {
+                    this._sound_driver.playNoteCore(0, note.frequency, note.velocity, duration);
+                };
+            }
+        }
+    }
+
+    export namespace ArcadeMIDIImageParser {
+        export class ArcadeMIDIImageFrame {
+            private _img_ref: Image;
+            private _start_y: number;
+            private _stop_y: number;
+
+            private _duration_start_y: number;
+            private _duration_stop_y: number;
+            private _velocity_start_y: number;
+            private _velocity_stop_y: number;
+            private _note_start_y: number;
+            private _note_stop_y: number;
+
+            private _frame_len: number;
+
+            public constructor(img_ref: Image, start_y: number, stop_y: number) {
+                this._img_ref = img_ref;
+                this._start_y = start_y;
+                this._stop_y = stop_y;
+                this.recompute_frame(DEBUG_PARSING);
+            }
+
+            /**
+             * Gets the reference image.
+             * 
+             * @return An image.
+             */
+            get image_ref(): Image {
+                return this._img_ref;
+            }
+
+            /**
+             * Gets the frame length.
+             * 
+             * @return A number, the width of the image - 2.
+             */
+            get frame_length(): number {
+                return this._frame_len;
+            }
+
+            /**
+             * Recomputes the frame from the image.
+             * Note: This will parse the image to recompute neccessary information, and may take a long time.
+             * 
+             * @param debug Whether to log what we find. 
+             */
+            private recompute_frame(debug: boolean = false): void {
+                let duration_start_y: number | undefined = undefined;
+                let duration_stop_y: number | undefined = undefined;
+                let velocity_start_y: number | undefined = undefined;
+                let velocity_stop_y: number | undefined = undefined;
+                let note_start_y: number | undefined = undefined;
+                let note_stop_y: number | undefined = undefined;
+
+                const frame_x: number = 1;
+
+                const note_color: number = 1;  // White
+                const velocity_color: number = 2;  // Red
+                const duration_color: number = 3;  // Pink
+
+                const log = (s: string) => {
+                    if (debug) {
+                        console.log(s);
+                    }
+                };
+
+                for (let y = this._start_y; y <= this._stop_y; y++) {
+                    const prev_px = this._img_ref.getPixel(frame_x, y - 1);
+                    const curr_px = this._img_ref.getPixel(frame_x, y);
+                    const next_px = this._img_ref.getPixel(frame_x, y + 1);
+
+                    if (prev_px != curr_px) {  // Starting new color
+                        switch (curr_px) {
+                            case (note_color): {
+                                note_start_y = y;
+                                log(`Found note start at ${y}`);
+                                break;
+                            }
+                            case (velocity_color): {
+                                velocity_start_y = y;
+                                log(`Found velocity start at ${y}`);
+                                break;
+                            }
+                            case (duration_color): {
+                                duration_start_y = y;
+                                log(`Found duration start at ${y}`);
+                                break;
+                            }
+                            default: {
+                                log(`Found unknown start at ${y}`);
+                                break;
+                            }
+                        }
+                    } else if (next_px != curr_px) {  // Ending new color
+                        switch (curr_px) {
+                            case (note_color): {
+                                note_stop_y = y;
+                                log(`Found note end at ${y}`);
+                                break;
+                            }
+                            case (velocity_color): {
+                                velocity_stop_y = y;
+                                log(`Found velocity end at ${y}`);
+                                break;
+                            }
+                            case (duration_color): {
+                                duration_stop_y = y;
+                                log(`Found duration end at ${y}`);
+                                break;
+                            }
+                            default: {
+                                log(`Found unknown end at ${y}`);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                this._duration_start_y = duration_start_y;
+                this._duration_stop_y = duration_stop_y;
+                this._velocity_start_y = velocity_start_y;
+                this._velocity_stop_y = velocity_stop_y;
+                this._note_start_y = note_start_y;
+                this._note_stop_y = note_stop_y;
+
+                this._frame_len = this._img_ref.width - 2;
+            }
+
+            /**
+             * Get the hex value from the image, most significant byte first on top.
+             * 
+             * @param x The x value in the image.
+             * @param start_y The starting y value in the image.
+             * @param stop_y The ending y value in the image.
+             */
+            private get_hex_val(x: number, start_y: number, stop_y: number): number {
+                // Number.toString(16) does not work in Arcade
+                // This only works with numbers up to 15
+                const numToHex = (num: number): string => {
+                    if (num < 10) {
+                        return num.toString();
+                    } else {
+                        const letters = ["a", "b", "c", "d", "e", "f"];
+                        return letters[num - 10];
+                    }
+                }
+
+                let hex_str: string = "";
+                for (let y = start_y; y <= stop_y; y++) {
+                    const px = this._img_ref.getPixel(x + 2, y);
+                    hex_str += numToHex(px);
+                }
+
+                return parseInt(hex_str.length > 0 ? hex_str : "0", 16);
+            }
+
+            /**
+             * Gets the duration at the specified X index.
+             * 
+             * @param x The x index, starting from 0.
+             * @return The duration, in milliseconds.
+             */
+            public get_duration(x: number): number {
+                return this.get_hex_val(x, this._duration_start_y, this._duration_stop_y);
+            }
+
+            /**
+             * Gets the velocity at the specified X index.
+             * 
+             * @param x The x index, starting from 0.
+             * @return The velocity.
+             */
+            public get_velocity(x: number): number {
+                return this.get_hex_val(x, this._velocity_start_y, this._velocity_stop_y);
+            }
+
+            /**
+             * Gets the notes at the specified X index.
+             * 
+             * @param x The x index, starting from 0.
+             * @param A list of note indicies that are pressed.
+             */
+            public get_notes(x: number): number[] {
+                const notes: number[] = [];
+
+                let fake_y: number = 0;
+                for (let y = this._note_start_y; y <= this._note_stop_y; y++) {
+                    if (this._img_ref.getPixel(x + 2, y) != 0) {
+                        notes.push(fake_y);
+                    }
+                    fake_y++;
+                }
+
+                return notes;
+            }
+        }
+
+        export class ArcadeMIDIImageParser {
+            private _stop: boolean;
+            private _img_queue: Image[];
+            private _frame_queue: ArcadeMIDIImageFrame[];
+
+            public constructor() {
+                this._stop = false;
+                this._img_queue = [];
+                this._frame_queue = [];
+            }
+
+            /**
+             * Gets the image queue. 
+             * 
+             * @return A list of images.
+             */
+            get queue(): Image[] {
+                return this._img_queue;
+            }
+
+            /**
+             * Sets the image queue. 
+             * Note: This will parse all the images to recompute neccessary information, and may take a long time.
+             * 
+             * @param new_queue The new list of images.
+             */
+            set queue(new_queue: Image[]) {
+                this._img_queue = new_queue;
+                this.recompute_frames(DEBUG_PARSING);
+            }
+
+            /**
+             * Gets the frames, that you can pass to a ArcadeMIDIImageFramePlayer.
+             * 
+             * @return A list of frames, can be 0 length.
+             */
+            get frames(): ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame[] {
+                return this._frame_queue;
+            }
+
+            /**
+             * Recomputes the frames from the images. 
+             * Note: This will parse all the images to recompute neccessary information, and may take a long time.
+             * 
+             * @param debug Whether to log what we found or not.
+             */
+            private recompute_frames(debug: boolean = false): void {
+                this._frame_queue = [];
+
+                const log = (s: string) => {
+                    if (debug) {
+                        console.log(s);
+                    }
+                };
+
+                for (const img of this._img_queue) {
+                    let this_frame_start: number = 0;
+
+                    for (let y = 0; y < img.height; y++) {
+                        const prev_px = img.getPixel(0, y - 1);
+                        const curr_px = img.getPixel(0, y);
+                        const next_px = img.getPixel(0, y + 1);
+
+                        if (prev_px != curr_px) {  // Start of new frame
+                            this_frame_start = y;
+                            log(`Found start of new frame at Y: ${y} (color: ${curr_px})`);
+                        } else if (next_px != curr_px) {  // End of this frame
+                            switch (curr_px) {
+                                case (1): {  // White
+                                    log(`Found note frame ending at Y: ${y} (color: ${curr_px})`);
+                                    this._frame_queue.push(new ArcadeMIDIImageFrame(img, this_frame_start, y));
+                                    break;
+                                }
+                                default: {
+                                    log(`Found unknown frame ending at Y: ${y} (color: ${curr_px})`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+
+    export namespace ArcadeMIDIImageFramePlayer {
+        export class ArcadeMIDIImageFramePlayer {
+            private _driver: ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions;
+
+            public constructor() {
+                this._driver = new ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions();
+            }
+
+            public play(frame: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame) {
+                const log = (s: string) => {
+                    if (DEBUG_PLAYING) {
+                        console.log(s);
+                    }
+                };
+
+                for (let x = 0; x < frame.frame_length; x++) {
+                    const frame_time: number = frame.get_duration(x);
+                    const frame_velocity: number = frame.get_velocity(x);
+                    const frame_notes: number[] = frame.get_notes(x);
+
+                    log(`Playing ${frame_notes.length} notes for ${frame_time} ms at ${frame_velocity} velocity`);
+                    for (const note of frame_notes) {
+                        this._driver.note_on(note, frame_velocity, 0, false);
+                    }
+                    this._driver.play_now(frame_time);
+                    pause(frame_time);
+                }
+            }
+        }
+
+        export class ArcadeMIDIMultiImageFramePlayer {
+
+        }
+    }
 }
 
-const midi_instr = new ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions();
+game.consoleOverlay.setVisible(true);
 
+const parser = new ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageParser();
+parser.queue = {IMAGE_LIST};
+
+const player = new ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIImageFramePlayer();
+player.play(parser.frames[0]);
 """
+
+
+def format_hex(num: int, min_len: int = 0) -> str:
+    raw_hex = hex(num)[2:]
+    return ("0" * (min_len - len(raw_hex))) + raw_hex
+
+
+image = [
+    ("1" * (8 + 2 + (88 + 21))),
+    ("3" * 8) + ("2" * 2) + ("1" * (88 + 21))
+]
 
 for msg in msgs:
     if msg.type == "note_on":
         logger.debug(f"Note message: {msg}")
-        name = note_num_to_name(msg.note - 21)
-        code += f"midi_instr.note_on(" \
-                f"{msg.note}, /* {name} */ " \
-                f"{msg.velocity}, " \
-                f"{round(msg.time * 1000)}" \
-                f");\n"
+
+        column = ""
+        column += format_hex(round(msg.time * 1000), 8)
+        column += format_hex(msg.velocity, 2)
+
+        notes = ["0"] * (88 + 21)
+        for note in (msg.note, ):
+            notes[note] = "1"
+        column += "".join(notes)
+
+        image.append(column)
+
+        # name = note_num_to_name(msg.note - 21)
+        # code += f"midi_instr.note_on(" \
+        #         f"{msg.note}, /* {name} */ " \
+        #         f"{msg.velocity}, " \
+        #         f"{round(msg.time * 1000)}" \
+        #         f");\n"
     else:
         logger.debug(f"Meta message: {msg}")
+
+grid = ""
+for y in range(len(image[0])):
+    for x in range(min(len(image), 512)):
+        grid += f"{image[x][y]} "
+    grid += "\n"
+
+image_code = f"img`\n{grid}\n`"
+code = code.replace("{IMAGE_LIST}", f"[{image_code}]")
 
 if to_stdout:
     print(code)
