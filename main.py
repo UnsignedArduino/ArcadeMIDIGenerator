@@ -585,7 +585,40 @@ code = """namespace ArcadeMIDI {
         }
 
         export class ArcadeMIDIMultiImageFramePlayer {
+            _frames: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame[];
+            _driver: ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIImageFramePlayer;
 
+            public constructor() {
+                this._frames = [];
+                this._driver = new ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIImageFramePlayer();
+            }
+
+            /**
+             * Gets the image frames.
+             * 
+             * @return A list of frames.
+             */
+            get frames(): ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame[] {
+                return this._frames;
+            }
+
+            /**
+             * Sets the image frames, and stops playing if we are.
+             * 
+             * @param new_frames A list of frames.
+             */
+            set frames(new_frames: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame[]) {
+                this._frames = new_frames;
+            }
+
+            /**
+             * Starts playing the music.
+             */
+            play(): void {
+                for (const frame of this._frames) {
+                    this._driver.play(frame);
+                }
+            }
         }
     }
 }
@@ -595,8 +628,10 @@ game.consoleOverlay.setVisible(true);
 const parser = new ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageParser();
 parser.queue = {IMAGE_LIST};
 
-const player = new ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIImageFramePlayer();
-player.play(parser.frames[0]);
+const player = new ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIMultiImageFramePlayer();
+player.frames = parser.frames;
+player.play();
+
 """
 
 
@@ -605,43 +640,79 @@ def format_hex(num: int, min_len: int = 0) -> str:
     return ("0" * (min_len - len(raw_hex))) + raw_hex
 
 
-image = [
-    ("1" * (8 + 2 + (88 + 21))),
-    ("3" * 8) + ("2" * 2) + ("1" * (88 + 21))
-]
+def format_col(time: int, velocity: int, notes: list[int]) -> str:
+    """
+    Formats a column.
+
+    :param time: The time, in milliseconds.
+    :param velocity: Velocity.
+    :param notes: A list of MIDI note to press.
+    :return: A string.
+    """
+    col = format_hex(time, 8)
+    col += format_hex(velocity, 2)
+    note_list = ["0"] * (88 + 21)
+    for note in notes:
+        note_list[note] = "f" if "#" in note_num_to_name(note - 21) else "1"
+    col += "".join(note_list)
+    col += "0"
+    return col
+
+
+image = []
+width_count = 0
 
 for msg in msgs:
     if msg.type == "note_on":
         logger.debug(f"Note message: {msg}")
 
-        column = ""
-        column += format_hex(round(msg.time * 1000), 8)
-        column += format_hex(msg.velocity, 2)
+        if width_count == 0:
+            image.append(("1" * (8 + 2 + (88 + 21))) + "0")
+            image.append(("3" * 8) + ("2" * 2) + ("1" * (88 + 21)) + "0")
+            width_count = 2
 
-        notes = ["0"] * (88 + 21)
-        for note in (msg.note, ):
-            notes[note] = "1"
-        column += "".join(notes)
+        image.append(format_col(round(msg.time * 1000), msg.velocity, [msg.note]))
 
-        image.append(column)
-
-        # name = note_num_to_name(msg.note - 21)
-        # code += f"midi_instr.note_on(" \
-        #         f"{msg.note}, /* {name} */ " \
-        #         f"{msg.velocity}, " \
-        #         f"{round(msg.time * 1000)}" \
-        #         f");\n"
+        width_count += 1
+        if width_count == 512:
+            width_count = 0
     else:
         logger.debug(f"Meta message: {msg}")
 
-grid = ""
-for y in range(len(image[0])):
-    for x in range(min(len(image), 512)):
-        grid += f"{image[x][y]} "
-    grid += "\n"
 
-image_code = f"img`\n{grid}\n`"
-code = code.replace("{IMAGE_LIST}", f"[{image_code}]")
+def format_cols_to_img(cols: list[str], pre_pad: str = "",
+                       start_at: int = 0) -> str:
+    """
+    Flips an array sideways and makes it a string or something like that.
+
+    :param cols: A list of strs.
+    :param pre_pad: A string of what you want to pre_pad each line with.
+     Defaults to "".
+    :param start_at: Start at some point along the strings.
+    :return: A string.
+    """
+    grid = ""
+    for y in range(len(cols[0])):
+        grid += f"{pre_pad}    "
+        for x in range(start_at, min(len(cols), start_at + 512)):
+            grid += f"{cols[x][y]} "
+        grid += "\n"
+    return grid
+
+
+images_code = ""
+
+if not to_stdout:
+    logger.info(f"Writing {ceil(len(image) / 4 / 512)} images")
+
+for i in range(0, len(image), 512 * 4):
+    images_code += "img`\n"
+    for j in range(i, i + (512 * 4), 512):
+        images_code += format_cols_to_img(image, pre_pad="    ", start_at=j)
+    images_code += "`,\n"
+
+code = code.replace("{IMAGE_LIST}",
+                    f"[\n{images_code}]")
 
 if to_stdout:
     print(code)
