@@ -120,8 +120,14 @@ def get_frequency(note: str, A4: int = 440) -> float:
 logger.info("Generating code")
 
 code = """namespace ArcadeMIDI {
-    let DEBUG_PARSING: boolean = true;
-    let DEBUG_PLAYING: boolean = true;
+    let DEBUG_PARSING: boolean = false;
+    let DEBUG_PLAYING: boolean = false;
+
+    export function log(parsing: boolean, playing: boolean, console_on_screen: boolean): void {
+        DEBUG_PARSING = parsing;
+        DEBUG_PLAYING = playing;
+        game.consoleOverlay.setVisible(console_on_screen);
+    }
 
     export namespace ArcadeMIDIInternals {
         interface ArcadeMIDINote {
@@ -135,7 +141,7 @@ code = """namespace ArcadeMIDI {
         //% shim=music::queuePlayInstructions
         function queuePlayInstructions(timeDelta: number, buf: Buffer) { }
 
-        class ArcadeMIDISound {
+        export class ArcadeMIDISound {
             /**
              * Formats and writes to a provided buffer the neccessary information to play a note.
              * 
@@ -623,8 +629,6 @@ code = """namespace ArcadeMIDI {
     }
 }
 
-game.consoleOverlay.setVisible(true);
-
 const parser = new ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageParser();
 parser.queue = {IMAGE_LIST};
 
@@ -706,10 +710,10 @@ if not to_stdout:
     logger.info(f"Writing {ceil(len(image) / 4 / 512)} images")
 
 for i in range(0, len(image), 512 * 4):
-    images_code += "img`\n"
+    images_code += "    img`\n"
     for j in range(i, i + (512 * 4), 512):
-        images_code += format_cols_to_img(image, pre_pad="    ", start_at=j)
-    images_code += "`,\n"
+        images_code += format_cols_to_img(image, pre_pad="", start_at=j)
+    images_code += "    `,\n"
 
 code = code.replace("{IMAGE_LIST}",
                     f"[\n{images_code}]")
