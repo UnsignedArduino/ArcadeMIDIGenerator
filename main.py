@@ -736,19 +736,24 @@ def format_cols_to_img(cols: list[str], pre_pad: str = "",
         for x in range(start_at, min(len(cols), start_at + 512)):
             grid += f"{cols[x][y]} "
         grid += "\n"
-    return grid
+    return f"{pre_pad}    {grid.strip()}\n"
 
 
 images_code = ""
 
-if not to_stdout:
-    logger.info(f"Writing {ceil(len(image) / 4 / 512)} images")
+img_count = 0
 
 for i in range(0, len(image), 512 * 4):
     images_code += "    img`\n"
-    for j in range(i, i + (512 * 4), 512):
-        images_code += format_cols_to_img(image, pre_pad="", start_at=j)
+    j = i
+    while j < i + (512 * 4):
+        images_code += format_cols_to_img(image, start_at=j)
+        j += 512
     images_code += "    `,\n"
+    img_count += 1
+
+
+logger.info(f"Generated {img_count} image(s)")
 
 code = code.replace("{IMAGE_LIST}",
                     f"[\n{images_code}]")
