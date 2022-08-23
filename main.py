@@ -663,10 +663,31 @@ def format_col(time: int, velocity: int, notes: list[int]) -> str:
     return col
 
 
+def secs_to_ms(t: float) -> int:
+    """
+    Convert seconds to milliseconds.
+
+    :param t: The time, in seconds.
+    :return: The time, in milliseconds, rounded.
+    """
+    return round(t * 1000)
+
+
 image = []
 width_count = 0
 
-for msg in msgs:
+i = 0
+while msgs[i].type != "note_on":
+    i += 1
+
+last_time = secs_to_ms(msgs[i].time)
+last_velocity = msgs[i].velocity
+last_notes = [msgs[i].note]
+
+while i < len(msgs):
+    msg = msgs[i]
+    next_msg = msgs[i + 1] if i + 1 < len(msgs) else None
+
     if msg.type == "note_on":
         logger.debug(f"Note message: {msg}")
 
@@ -675,13 +696,27 @@ for msg in msgs:
             image.append(("3" * 8) + ("2" * 2) + ("1" * (88 + 21)) + "0")
             width_count = 2
 
-        image.append(format_col(round(msg.time * 1000), msg.velocity, [msg.note]))
+        msg_time = secs_to_ms(msg.time)
 
-        width_count += 1
+        if last_time != msg_time or last_velocity != msg.velocity:
+            logger.debug("Inserting new chord")
+
+            image.append(format_col(last_time, last_velocity, last_notes))
+            width_count += 1
+
+            last_time = msg_time
+            last_velocity = msg.velocity
+            last_notes = [msg.note]
+        else:
+            logger.debug("Appending to last chord")
+
+            last_notes.append(msg.note)
+
         if width_count == 512:
             width_count = 0
     else:
         logger.debug(f"Meta message: {msg}")
+    i += 1
 
 
 def format_cols_to_img(cols: list[str], pre_pad: str = "",
