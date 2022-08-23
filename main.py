@@ -738,6 +738,11 @@ code = """namespace ArcadeMIDI {
              */
             play(in_bg: boolean = false): void {
                 const play_all = (): void => {
+                    this.stopped = true;
+                    while (!this.stopped) {
+                        pause(20);
+                    }
+
                     for (const frame of this._frames) {
                         this._driver.play(frame);
                         if (this._driver.stopped) {
