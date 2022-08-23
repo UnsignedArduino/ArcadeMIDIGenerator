@@ -694,6 +694,7 @@ code = """namespace ArcadeMIDI {
              */
             set frames(new_frames: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame[]) {
                 this._frames = new_frames;
+                this.stopped = true;
             }
 
             /**
