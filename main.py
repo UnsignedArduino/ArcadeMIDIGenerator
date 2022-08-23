@@ -585,7 +585,7 @@ code = """namespace ArcadeMIDI {
                 this._pls_pause = false;
                 this._actually_paused = false;
                 this._pls_stop = false;
-                this._actually_stopped = false;
+                this._actually_stopped = true;
             }
 
             /**
