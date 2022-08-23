@@ -267,13 +267,23 @@ code = """namespace ArcadeMIDI {
              * 
              * @param duration The duration to play all the playing notes.
              */
-            public play_now(duration: number) {
+            public play_now(duration: number): void {
                 if (DEBUG_PLAYING) {
                     console.log(`Playing ${this._playing_notes.length} frequencies`);
                 }
                 for (const note of this._playing_notes) {
                     this._sound_driver.playNoteCore(0, note.frequency, note.velocity, duration);
                 };
+            }
+
+            /**
+             * Stop playing all the notes.
+             */
+            public stop_all(): void {
+                if (DEBUG_PLAYING) {
+                    console.log("Stopping all notes");
+                }
+                this._playing_notes.splice(0, this._playing_notes.length);
             }
         }
     }
@@ -564,16 +574,70 @@ code = """namespace ArcadeMIDI {
         export class ArcadeMIDIImageFramePlayer {
             private _driver: ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions;
 
+            private _pls_pause: boolean;
+            private _actually_paused: boolean;
+
+            private _pls_stop: boolean;
+            private _actually_stopped: boolean;
+
             public constructor() {
                 this._driver = new ArcadeMIDI.ArcadeMIDIInternals.ArcadeMIDIInstructions();
+                this._pls_pause = false;
+                this._actually_paused = false;
+                this._pls_stop = false;
+                this._actually_stopped = false;
             }
 
-            public play(frame: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame) {
+            /**
+             * Get whether we are paused or not.
+             */
+            get paused(): boolean {
+                return this._actually_paused;
+            }
+
+            /**
+             * Set whether we are paused or not. Note, we won't actually pause until the end of the current note.
+             * Use the getter paused function to check if we have actually paused.
+             * 
+             * @param new_state Set whether we are paused or not.
+             */
+            set paused(new_state: boolean) {
+                this._pls_pause = new_state;
+            }
+
+            /**
+             * Get whether we have stopped or not. Note, that if we haven't played a frame before then this will return false!
+             */
+            get stopped(): boolean {
+                return this._actually_stopped;
+            }
+
+            /**
+             * Set whether we should stop or not. Note, we won't actually stop until the end of the current note.
+             * Use the getter stopped function to check if we have actually stopped.
+             * 
+             * @param new_state Set whether we are stopped or not.
+             */
+            set stopped(new_state: boolean) {
+                this._pls_stop = new_state;
+            }
+
+            /**
+             * Play through a frame. Note that on play we will reset all the request flags for pausing and stopping!
+             * 
+             * @param frame The frame to play.
+             */
+            public play(frame: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame): void {
                 const log = (s: string) => {
                     if (DEBUG_PLAYING) {
                         console.log(s);
                     }
                 };
+
+                this._pls_pause = false;
+                this._actually_paused = false;
+                this._pls_stop = false;
+                this._actually_stopped = false;
 
                 for (let x = 0; x < frame.frame_length; x++) {
                     const frame_time: number = frame.get_duration(x);
@@ -586,13 +650,28 @@ code = """namespace ArcadeMIDI {
                     }
                     this._driver.play_now(frame_time);
                     pause(frame_time);
+
+                    if (this._pls_stop) {
+                        this._driver.stop_all();
+                        this._actually_stopped = true;
+                        log("Serviced requested stop");
+                        return;
+                    } else if (this._pls_pause) {
+                        this._actually_paused = true;
+                        log("Serviced requested pause");
+                        while (this._pls_pause) {
+                            pause(50);
+                        }
+                        log("End of requested pause");
+                        this._actually_paused = false;
+                    }
                 }
             }
         }
 
         export class ArcadeMIDIMultiImageFramePlayer {
-            _frames: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame[];
-            _driver: ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIImageFramePlayer;
+            private _frames: ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageFrame[];
+            private _driver: ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIImageFramePlayer;
 
             public constructor() {
                 this._frames = [];
@@ -618,25 +697,85 @@ code = """namespace ArcadeMIDI {
             }
 
             /**
-             * Starts playing the music.
+             * Get whether we are paused or not.
              */
-            play(): void {
-                for (const frame of this._frames) {
-                    this._driver.play(frame);
+            get paused(): boolean {
+                return this._driver.paused;
+            }
+
+            /**
+             * Set whether we are paused or not. Note, we won't actually pause until the end of the current note.
+             * Use the getter paused function to check if we have actually paused.
+             * 
+             * @param new_state Set whether we are paused or not.
+             */
+            set paused(new_state: boolean) {
+                this._driver.paused = new_state;
+            }
+
+            /**
+             * Get whether we have stopped or not. Note, that if we haven't played a frame before then this will return false!
+             */
+            get stopped(): boolean {
+                return this._driver.stopped;
+            }
+
+            /**
+             * Set whether we should stop or not. Note, we won't actually stop until the end of the current note.
+             * Use the getter stopped function to check if we have actually stopped.
+             * 
+             * @param new_state Set whether we are stopped or not.
+             */
+            set stopped(new_state: boolean) {
+                this._driver.stopped = new_state;
+            }
+
+            /**
+             * Starts playing the music.
+             * 
+             * @param in_bg Whether to play this in a background thread. Defaults to false.
+             */
+            play(in_bg: boolean = false): void {
+                const play_all = (): void => {
+                    for (const frame of this._frames) {
+                        this._driver.play(frame);
+                        if (this._driver.stopped) {
+                            break;
+                        }
+                    }
+                };
+
+                if (in_bg) {
+                    control.runInParallel(play_all);
+                } else {
+                    play_all();
                 }
             }
         }
     }
 }
 
+ArcadeMIDI.log(true, true, true);
+
 const parser = new ArcadeMIDI.ArcadeMIDIImageParser.ArcadeMIDIImageParser();
 parser.queue = {IMAGE_LIST};
 
 const player = new ArcadeMIDI.ArcadeMIDIImageFramePlayer.ArcadeMIDIMultiImageFramePlayer();
 player.frames = parser.frames;
-player.play();
 
-"""
+controller.A.onEvent(ControllerButtonEvent.Pressed, () => {
+    player.paused = !player.paused;
+});
+
+controller.B.onEvent(ControllerButtonEvent.Pressed, () => {
+    if (player.stopped) {
+        player.play(true);
+    } else {
+        player.stopped = true;
+    }
+});
+
+player.play(true);"""
 
 
 def format_hex(num: int, min_len: int = 0) -> str:
